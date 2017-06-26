@@ -1,0 +1,21 @@
+{
+  "name": "cameleon",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node ./bin/www"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "body-parser": "^1.17.2",
+    "eth-lightwallet": "^2.5.4",
+    "express": "^4.15.3",
+    "ipfs-api": "^14.0.3",
+    "path": "^0.12.7",
+    "solc": "^0.4.11",
+    "web3": "^0.19.0"
+  }
+}
