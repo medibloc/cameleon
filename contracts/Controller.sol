@@ -1,42 +1,61 @@
 pragma solidity ^0.4.11;
 
+import "./Proxy.sol";
+
 contract Controller {
-    uint private version;
-    address user;
-    address recovery;
-    address proxy;
+  event Forwarded (address indexed destination,uint value,bytes data);
 
-    modifier onlyRecovery() {
-      if (msg.sender == recovery)
-        _;
-    }
+  uint private version;
+  address user;
+  address recovery;
+  address proxy;
 
-    modifier onlyUser() {
-      if (msg.sender == user)
-        _;
-    }
+  modifier onlyRecovery() {
+    if (msg.sender == recovery)
+      _;
+  }
 
-    function Controller(address _user) {
-      version = 0;
-      user = _user;
-    }
+  modifier onlyUser() {
+    if (msg.sender == user)
+      _;
+  }
 
-    function initialize(address recoveryAddr, address proxyAddr) onlyUser {
-      recovery = recoveryAddr;
-      proxy = proxyAddr;
-    }
+  function Controller(address _user) {
+    version = 0;
+    user = _user;
+  }
 
-    function getVersion() returns (uint version) {
-      return version;
-    }
+  function initialize(address recoveryAddr, address proxyAddr) onlyUser {
+    recovery = recoveryAddr;
+    proxy = proxyAddr;
+  }
 
-    function changeUser(address _user) onlyRecovery {
-      user = _user;
-    }
+  function getVersion() returns (uint version) {
+    return version;
+  }
 
-    function forward(address destination, uint value, bytes data) onlyUser {
-      if (!proxy.call(bytes4(keccak256("forward(address, uint, bytes)")), destination, value, data)) {
-          throw;
-      }
-    }
+  function getProxy() constant returns (address) {
+    return proxy;
+  }
+
+  function getRecovery() constant returns (address) {
+    return recovery;
+  }
+
+  function getUser() constant returns (address) {
+    return user;
+  }
+
+  function changeUser(address _user) onlyRecovery {
+    user = _user;
+  }
+
+  function forward(address destination, uint value, bytes data) {
+    Proxy p = Proxy(proxy);
+    p.forward(destination, value, data);
+    // if (!proxy.call(bytes4(keccak256("forward(address, uint, bytes)")), destination, value, data)) {
+    //     throw;
+    // }
+    Forwarded(destination, value, data);
+  }
 }

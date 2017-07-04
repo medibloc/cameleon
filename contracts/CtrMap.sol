@@ -7,7 +7,7 @@ contract CtrMap {
       controllers[keccak256(email)] = controller;
     }
 
-    function get(string email) returns (address) {
+    function get(string email) constant returns (address) {
       return controllers[keccak256(email)];
     }
 }
