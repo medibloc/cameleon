@@ -43,12 +43,12 @@ function init(next) {
     if (e) {return next(e)}
     var CtrMap = web3.eth.contract(r.abi)
     ctrMap = CtrMap.at(r.address)
-  })
 
-  deploy('Profiles', [], null, (e, r) => {
-    if (e) {return next(e)}
-    var Profiles = web3.eth.contract(r.abi)
-    profiles = Profiles.at(r.address)
+    deploy('Profiles', [], null, (e, r) => {
+      if (e) {return next(e)}
+      var Profiles = web3.eth.contract(r.abi)
+      profiles = Profiles.at(r.address)
+    })
   })
 
   compile('Controller', 'Proxy', (e, r) => {
@@ -163,18 +163,12 @@ function setupAccount(email, next) {
           var proxy = ProxyContract.at(r.address)
           console.log('Proxy: ' + proxy.address)
 
-          // let initialize = controller.initialize.getData(recovery.address, proxy.address)
-          // return web3.eth.accounts.signTransaction({
-          //   data: initialize,
-          //   gas: web3.eth.estimateGas({data: initialize})
-          // }, account.privateKey, next)
-
           controller.getUser((e, r) => {
             console.log('Controller\'s owner: ' + r)
             console.log('Account: ' + account)
           })
 
-          let gasEstimate = web3.toWei(2, 'ether')
+          let gasEstimate = web3.toWei(0.2, 'ether')
 
           let controllerInitializeData = controller.initialize.getData(recovery.address, proxy.address)
           let priKey = ks.exportPrivateKey(account.substring(2), dkey)
@@ -196,39 +190,26 @@ function setupAccount(email, next) {
           let serializedTx = tx.serialize()
           let stx = '0x' + serializedTx.toString('hex')
 
-
-          // let initializeTx = tu.functionTx(Controller.abi, 'initialize',
-          //   [recovery.address, proxy.address], {
-          //     nonce: '0x00',
-          //     to: controller.address,
-          //     from: account,
-          //     gasPrice: web3.eth.gasPrice.toString(),
-          //     gasLimit: '0x47E7C4',
-          //     value: '0x00'
-          //   })
-
-          // console.log('initialize() tx(Unsigned): ' + initializeTx)
-
-          // let stx = '0x' + sg.signTx(ks, dkey, initializeTx, account.substr(2))
           console.log('Signed tx: ' + stx)
           console.log('Type of stx: ' + typeof stx)
 
-          web3.eth.sendTransaction({from: web3.eth.coinbase, to: account, value: gasEstimate}, (e, r) => {
-            if (e) {return next(e)}
-            console.log('Sent gas fee to the new account!')
-
-            web3.eth.sendRawTransaction(stx, (e, r) => {
+          web3.eth.sendTransaction({from: web3.eth.coinbase, to: account, value: gasEstimate},
+            (e, r) => {
               if (e) {return next(e)}
-              console.log('Transaction Hash: ', r)
-              controller.getProxy((e, r) => {console.log('Proxy: ' + r)})
-              controller.getRecovery((e, r) => {console.log('Recovery: ' + r)})
-              return next(null, {
-                tx: r,
-                account: account,
-                key: priKey
+              console.log('Sent gas fee to the new account!')
+
+              web3.eth.sendRawTransaction(stx, (e, r) => {
+                if (e) {return next(e)}
+                console.log('Transaction Hash: ', r)
+                controller.getProxy((e, r) => {console.log('Proxy: ' + r)})
+                controller.getRecovery((e, r) => {console.log('Recovery: ' + r)})
+                return next(null, {
+                  tx: r,
+                  account: account,
+                  key: priKey
+                })
               })
             })
-          })
         })
       })
     })
@@ -263,24 +244,7 @@ function updateProfile(email, account, priKey, profile, next) {
       controller.getProxy((e, r) => {console.log('Proxy: ' + r)})
       controller.getRecovery((e, r) => {console.log('Recovery: ' + r)})
 
-      let controllerForwarded = controller.Forwarded()
-      controllerForwarded.watch((e, r) => {
-        if (e) {
-          console.log('********** [Controller] Error occurred in forwarding: ' + e)
-        }
-        console.log('********** [Controller] Fowarding result: ' + r)
-      })
-
-      // controller.forward.sendTransaction(profiles.address, 0x00, profileUpdateData,
-      //   {from: web3.eth.coinbase}, (e, r) => {
-      //     if (e) {
-      //       console.log('Error occured calling forward()')
-      //       return next(e)
-      //     }
-      //     console.log(r)
-      // })
       let controllerForwardData = controller.forward.getData(profiles.address, 0x00, profileUpdateData)
-
       let keyBuffer = new Buffer(priKey, 'hex')
 
       let rawTx = {
@@ -302,7 +266,7 @@ function updateProfile(email, account, priKey, profile, next) {
       console.log('Signed tx: ' + stx)
       console.log('Type of stx: ' + typeof stx)
 
-      var gasEstimate = web3.toWei(0.5, 'ether')
+      var gasEstimate = web3.toWei(0.2, 'ether')
 
       web3.eth.sendTransaction({
         from: web3.eth.coinbase,
@@ -314,54 +278,44 @@ function updateProfile(email, account, priKey, profile, next) {
           return next(e)
         }
 
-        web3.eth.sendTransaction({
-          from: web3.eth.coinbase,
-          to: controllerAddr,
-          value: gasEstimate
-        }, (e, r) => {
-          if (e) {
-            console.log('Error while transfering gas fee to controller: ' + e)
-            return next(e)
-          }
+        if (e) {
+          console.log('Error while transfering gas fee to controller: ' + e)
+          return next(e)
+        }
 
-          let controllerForwarded = controller.Forwarded()
-          controllerForwarded.watch((e, r) => {
-            if (e) {
-              console.log('********** [Controller] Error occurred in forwarding: ' + e)
-            }
+        let controllerForwarded = controller.Forwarded({data: profileUpdateData})
+        controllerForwarded.watch((e, r) => {
+          if (e) {
+            console.log('********** [Controller] <<<Error>>> occurred in forwarding: ' + e)
+          } else {
             console.log('********** [Controller] Fowarding result: ' + r)
+          }
+          controllerForwarded.stopWatching()
+        })
+
+        var ret = {}
+        controller.getProxy((e, r) => {
+          let proxy = ProxyContract.at(r)
+          let forwarded = proxy.Forwarded({data: profileUpdateData})
+          forwarded.watch((e, r) => {
+            if (e) {
+              console.log('********** [Proxy] <<<Error>>> occurred in forwarding: ' + e)
+              return next(e)
+            } else {
+              console.log('********** [Proxy] Fowarding result: ' + r)
+            }
+            forwarded.stopWatching()
+            return next(null, ret)
           })
 
-          controller.getProxy((e, r) => {
-            let proxy = ProxyContract.at(r)
-            let forwarded = proxy.Forwarded()
-            forwarded.watch((e, r) => {
-              if (e) {
-                console.log('********** [Proxy] Error occurred in forwarding: ' + e)
-              }
-              console.log('********** [Proxy] Fowarding result: ' + r)
-            })
+          web3.eth.sendRawTransaction(stx, (e, r) => {
+            if (e) {
+              console.log('Error while processing update transaction: ' + e)
+              return next(e)
+            }
+            console.log('Transaction Hash: ', r)
 
-            web3.eth.sendTransaction({
-              from: web3.eth.coinbase,
-              to: proxy.address,
-              value: gasEstimate
-            }, (e, r) => {
-              if (e) {
-                console.log('Error while transfering gas fee to proxy: ' + e)
-                return next(e)
-              }
-
-              web3.eth.sendRawTransaction(stx, (e, r) => {
-                if (e) {
-                  console.log('Error while processing update transaction: ' + e)
-                  return next(e)
-                }
-                console.log('Transaction Hash: ', r)
-
-                return next(null, {tx: r})
-              })
-            })
+            ret.tx = r
           })
         })
       })

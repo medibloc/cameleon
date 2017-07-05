@@ -53,9 +53,6 @@ contract Controller {
   function forward(address destination, uint value, bytes data) {
     Proxy p = Proxy(proxy);
     p.forward(destination, value, data);
-    // if (!proxy.call(bytes4(keccak256("forward(address, uint, bytes)")), destination, value, data)) {
-    //     throw;
-    // }
     Forwarded(destination, value, data);
   }
 }
