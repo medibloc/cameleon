@@ -3,7 +3,8 @@ pragma solidity ^0.4.11;
 import "./Proxy.sol";
 
 contract Controller {
-  event Forwarded (address indexed destination,uint value,bytes data);
+  event Forwarded(address indexed destination, uint value, bytes data);
+  event Initialized(address indexed user);
 
   uint private version;
   address user;
@@ -28,6 +29,7 @@ contract Controller {
   function initialize(address recoveryAddr, address proxyAddr) onlyUser {
     recovery = recoveryAddr;
     proxy = proxyAddr;
+    Initialized(user);
   }
 
   function getVersion() returns (uint version) {
@@ -50,7 +52,7 @@ contract Controller {
     user = _user;
   }
 
-  function forward(address destination, uint value, bytes data) {
+  function forward(address destination, uint value, bytes data) onlyUser {
     Proxy p = Proxy(proxy);
     p.forward(destination, value, data);
     Forwarded(destination, value, data);

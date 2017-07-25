@@ -13,10 +13,14 @@ var dkey
 
 var web3
 var ctrMap
+var historyMap
 var profiles
+var doctors
+var mediBlocToken
 
 var Controller
 var ProxyContract
+var History
 
 function init(next) {
   console.log('Init called')
@@ -44,10 +48,28 @@ function init(next) {
     var CtrMap = web3.eth.contract(r.abi)
     ctrMap = CtrMap.at(r.address)
 
-    deploy('Profiles', [], null, (e, r) => {
+    deploy('HistoryMap', [], null, (e, r) => {
       if (e) {return next(e)}
-      var Profiles = web3.eth.contract(r.abi)
-      profiles = Profiles.at(r.address)
+      var HistoryMap = web3.eth.contract(r.abi)
+      historyMap = HistoryMap.at(r.address)
+
+      deploy('Profiles', [], null, (e, r) => {
+        if (e) {return next(e)}
+        var Profiles = web3.eth.contract(r.abi)
+        profiles = Profiles.at(r.address)
+
+        deploy('Doctors', [], null, (e, r) => {
+          if (e) {return next(e)}
+          var Doctors = web3.eth.contract(r.abi)
+          doctors = Doctors.at(r.address)
+
+          deploy('MediBlocToken', [1000000000, 'MediBloc Token', 4, 'MED'], null, (e, r) => {
+            if (e) {return next(e)}
+            var MediBlocToken = web3.eth.contract(r.abi)
+            mediBlocToken = MediBlocToken.at(r.address)
+          })
+        })
+      })
     })
   })
 
@@ -57,6 +79,10 @@ function init(next) {
 
   compile('Proxy', null, (e, r) => {
     ProxyContract = web3.eth.contract(r.abi)
+  })
+
+  compile('History', null, (e, r) => {
+    History = web3.eth.contract(r.abi)
   })
 }
 
@@ -163,53 +189,95 @@ function setupAccount(email, next) {
           var proxy = ProxyContract.at(r.address)
           console.log('Proxy: ' + proxy.address)
 
-          controller.getUser((e, r) => {
-            console.log('Controller\'s owner: ' + r)
-            console.log('Account: ' + account)
-          })
+          deploy('History', [proxy.address], null, (e, r) => {
+            if (e) {return next(e)}
+            var history = History.at(r.address)
+            console.log('History: ' + history.address)
 
-          let gasEstimate = web3.toWei(0.2, 'ether')
+            historyMap.update.sendTransaction(email, history.address, {from: web3.eth.coinbase}, (e, r) => {
 
-          let controllerInitializeData = controller.initialize.getData(recovery.address, proxy.address)
-          let priKey = ks.exportPrivateKey(account.substring(2), dkey)
-          let keyBuffer = new Buffer(priKey, 'hex')
+              mediBlocToken.transfer.sendTransaction(proxy.address, 10,
+                {from: web3.eth.coinbase}, (e, r) => {
+                  if (e) {return next(e)}
 
-          let rawTx = {
-            nonce: web3.toHex(web3.eth.getTransactionCount(account)),
-            to: controller.address,
-            from: account,
-            gasPrice: web3.toHex(web3.eth.gasPrice),
-            gasLimit: '0x47E7C4',
-            value: '0x00',
-            data: controllerInitializeData
-          }
+                  let mediTokenTransfered = mediBlocToken.Transfer({
+                    from: web3.eth.coinbase,
+                    to: proxy.address
+                  })
+                  mediTokenTransfered.watch((e, r) => {
+                    if (e) {
+                      console.log('****** Error while transferring MED to new user: ' + proxy.address)
+                    } else {
+                      console.log('****** Sent initial MED to the new user account: ' + proxy.address)
+                    }
+                  })
 
-          let tx = new etx(rawTx)
-          tx.sign(keyBuffer)
+                  controller.getUser((e, r) => {
+                    console.log('Controller\'s owner: ' + r)
+                    console.log('Account: ' + account)
+                  })
 
-          let serializedTx = tx.serialize()
-          let stx = '0x' + serializedTx.toString('hex')
+                  let gasEstimate = web3.toWei(0.2, 'ether')
 
-          console.log('Signed tx: ' + stx)
-          console.log('Type of stx: ' + typeof stx)
+                  let controllerInitializeData = controller.initialize.getData(recovery.address, proxy.address)
+                  let priKey = ks.exportPrivateKey(account.substring(2), dkey)
+                  let keyBuffer = new Buffer(priKey, 'hex')
 
-          web3.eth.sendTransaction({from: web3.eth.coinbase, to: account, value: gasEstimate},
-            (e, r) => {
-              if (e) {return next(e)}
-              console.log('Sent gas fee to the new account!')
+                  let rawTx = {
+                    nonce: web3.toHex(web3.eth.getTransactionCount(account)),
+                    to: controller.address,
+                    from: account,
+                    gasPrice: web3.toHex(web3.eth.gasPrice),
+                    gasLimit: '0x47E7C4',
+                    value: '0x00',
+                    data: controllerInitializeData
+                  }
 
-              web3.eth.sendRawTransaction(stx, (e, r) => {
-                if (e) {return next(e)}
-                console.log('Transaction Hash: ', r)
-                controller.getProxy((e, r) => {console.log('Proxy: ' + r)})
-                controller.getRecovery((e, r) => {console.log('Recovery: ' + r)})
-                return next(null, {
-                  tx: r,
-                  account: account,
-                  key: priKey
-                })
+                  let tx = new etx(rawTx)
+                  tx.sign(keyBuffer)
+
+                  let serializedTx = tx.serialize()
+                  let stx = '0x' + serializedTx.toString('hex')
+
+                  console.log('Signed tx: ' + stx)
+                  console.log('Type of stx: ' + typeof stx)
+
+                  var ret = {}
+
+                  let controllerInitialized = controller.Initialized({user: account})
+                  controllerInitialized.watch((e, r) => {
+                    if (e) {
+                      console.log('********** [Controller] <<<Error>>> occurred in iniitialization: ' + e)
+                    } else {
+                      console.log('********** [Controller] Initialization result: ' + r)
+                    }
+                    controllerInitialized.stopWatching()
+
+                    controller.getProxy((e, r) => {console.log('Proxy: ' + r)})
+                    controller.getRecovery((e, r) => {console.log('Recovery: ' + r)})
+
+                    return next(null, ret)
+                  })
+
+                  web3.eth.sendTransaction({from: web3.eth.coinbase, to: account, value: gasEstimate},
+                    (e, r) => {
+                      if (e) {return next(e)}
+                      console.log('Sent gas fee to the new account!')
+
+                      web3.eth.sendRawTransaction(stx, (e, r) => {
+                        if (e) {return next(e)}
+                        console.log('Transaction Hash: ', r)
+
+                        ret = {
+                          tx: r,
+                          account: account,
+                          key: priKey
+                        }
+                      })
+                    })
               })
             })
+          })
         })
       })
     })
@@ -342,7 +410,118 @@ function showProfile(email, account, next) {
         return next(e)
       }
 
-      profiles.profiles(r, (e, r) => {
+      let proxy = r
+      mediBlocToken.balanceOf(proxy, (e, r) => {
+        if (e) {
+          console.log('Error occurred getting MediBlocToken balanace of ' + account)
+          return next(e)
+        }
+
+        let balance = r
+
+        profiles.profiles(proxy, (e, r) => {
+          let hash = r
+          console.log('IPFS Hash: ' + hash)
+
+          di.get(hash, (e, r) => {
+            if (e) {
+              console.log('Error occurred getting profile data from IPFS')
+              return next(e)
+            }
+
+            console.log('IPFS Data: ' + r)
+            let obj = {
+              profile: JSON.parse(r),
+              balance: balance
+            }
+
+            doctors.isQualified(proxy, (e, r) => {
+              obj.isDoctor = r
+
+              return next(null, obj)
+            })
+          })
+        })
+      })
+    })
+  })
+}
+
+function approveDoctor(email, account, inst, role, next) {
+  web3.personal.unlockAccount(web3.eth.coinbase, "")
+  ctrMap.get(email, {from: web3.eth.coinbase}, (e, r) => {
+    if (e) {return next(e)}
+
+    if (r === '0x0000000000000000000000000000000000000000') {
+      return next(new Error('Cannot find a controller for the user account'))
+    }
+
+    var controllerAddr = r
+    console.log('Controller: ' + controllerAddr)
+
+    let controller = Controller.at(controllerAddr)
+
+    controller.getProxy((e, r) => {
+      if (e) {
+        console.log('Error occurred getting proxy address')
+        return next(e)
+      }
+
+      let proxy = r
+
+      doctors.approve.sendTransaction(proxy, {from: web3.eth.coinbase}, (e, r) => {
+        if (e) {return next(e)}
+
+        let event = doctors.Approved({account: proxy})
+        event.watch((e, r) => {
+          if (e) {
+            console.log('********** [Doctors] <<<Error>>> occurred : ' + e)
+          } else {
+            console.log('********** [Doctors] Approve result: ' + r)
+          }
+
+          doctors.isQualified(proxy, (e, r) => {
+            if (e) {return next(e)}
+            console.log('is Qualified: ' + r)
+
+            return next(null, {result: r, inst, role})
+          })
+        })
+      })
+    })
+  })
+}
+
+function isDoctor(account, next) {
+  doctors.isQualified(account, (e, r) => {
+    if (e) {return next(e)}
+
+    return next(null, r)
+  })
+}
+
+function searchByEmail(email, next) {
+  ctrMap.get(email, {from: web3.eth.coinbase}, (e, r) => {
+    if (e) {return next(e)}
+
+    if (r === '0x0000000000000000000000000000000000000000') {
+      return next(new Error('Cannot find a controller for the user account'))
+    }
+
+    var controllerAddr = r
+    console.log('Controller: ' + controllerAddr)
+
+    let controller = Controller.at(controllerAddr)
+
+    controller.getProxy((e, r) => {
+      if (e) {
+        console.log('Error occurred getting proxy address')
+        return next(e)
+      }
+
+      let proxy = r
+
+      profiles.profiles(proxy, (e, r) => {
         let hash = r
         console.log('IPFS Hash: ' + hash)
 
@@ -353,8 +532,187 @@ function showProfile(email, account, next) {
           }
 
           console.log('IPFS Data: ' + r)
-          return next(null, JSON.parse(r))
+
+          let profile = JSON.parse(r)
+          let obj = {
+            profile: {
+              name: profile.name,
+              isFemale: profile.isFemale,
+              age: new Date().getFullYear() - profile.birthY
+            },
+            account: proxy
+          }
+
+          doctors.isQualified(proxy, (e, r) => {
+            obj.isDoctor = r
+
+            return next(null, obj)
+          })
         })
+      })
+    })
+  })
+}
+
+function addHistory(patient, author, content, next) {
+  web3.personal.unlockAccount(web3.eth.coinbase, "")
+
+  let fileName = 'mbh_' + patient.email + '_' + Date.now() + '.json'
+  di.upload(content, fileName, (e, r) => {
+    if (e) {
+      console.log('Error occurred during IPFS upload!! : ' + e)
+      return next(e)
+    }
+
+    console.log(r)
+    var ipfsHash = r
+    console.log('IPFS Hash got: ' + ipfsHash)
+
+    ctrMap.get(author.email, {from: web3.eth.coinbase}, (e, r) => {
+      if (e) {return next(e)}
+
+      if (r === '0x0000000000000000000000000000000000000000') {
+        return next(new Error('Cannot find a controller for the user account'))
+      }
+
+      var controllerAddr = r
+      console.log('Controller: ' + controllerAddr)
+
+      let controller = Controller.at(controllerAddr)
+
+      historyMap.get(patient.email, (e, r) => {
+        if (e) {return next(e)}
+
+        let historyContract = History.at(r)
+
+        let historyUpdateData = historyContract.update.getData(ipfsHash)
+
+        let controllerForwardData = controller.forward.getData(historyContract.address, 0x00, historyUpdateData)
+        let keyBuffer = new Buffer(author.priKey, 'hex')
+
+        let rawTx = {
+          data: controllerForwardData,
+          nonce: web3.toHex(web3.eth.getTransactionCount(author.account)),
+          to: controllerAddr.toString(),
+          from: author.account,
+          gasPrice: web3.toHex(web3.eth.gasPrice),
+          gasLimit: '0x47E7C4',
+          value: '0x00'
+        }
+
+        var tx = new etx(rawTx)
+        tx.sign(keyBuffer)
+
+        var serializedTx = tx.serialize()
+        var stx = '0x' + serializedTx.toString('hex')
+
+        console.log('Signed tx: ' + stx)
+        console.log('Type of stx: ' + typeof stx)
+
+        var gasEstimate = web3.toWei(0.2, 'ether')
+
+        web3.eth.sendTransaction({
+          from: web3.eth.coinbase,
+          to: author.account,
+          value: gasEstimate
+        }, (e, r) => {
+          if (e) {
+            console.log('Error while transfering gas fee to user: ' + e)
+            return next(e)
+          }
+
+          if (e) {
+            console.log('Error while transfering gas fee to controller: ' + e)
+            return next(e)
+          }
+
+          let controllerForwarded = controller.Forwarded({data: historyUpdateData})
+          controllerForwarded.watch((e, r) => {
+            if (e) {
+              console.log('********** [Controller] <<<Error>>> occurred in forwarding: ' + e)
+            } else {
+              console.log('********** [Controller] Fowarding result: ' + r)
+            }
+            controllerForwarded.stopWatching()
+          })
+
+          var ret = {}
+          controller.getProxy((e, r) => {
+            let proxy = ProxyContract.at(r)
+            let forwarded = proxy.Forwarded({data: historyUpdateData})
+            forwarded.watch((e, r) => {
+              if (e) {
+                console.log('********** [Proxy] <<<Error>>> occurred in forwarding: ' + e)
+                return next(e)
+              } else {
+                console.log('********** [Proxy] Fowarding result: ' + r)
+              }
+              forwarded.stopWatching()
+              return next(null, ret)
+            })
+
+            web3.eth.sendRawTransaction(stx, (e, r) => {
+              if (e) {
+                console.log('Error while processing update transaction: ' + e)
+                return next(e)
+              }
+              console.log('Transaction Hash: ', r)
+
+              ret.tx = r
+            })
+          })
+        })
+      })
+    })
+  })
+}
+
+function getHistories(email, account, priKey, next) {
+  ctrMap.get(email, {from: web3.eth.coinbase}, (e, r) => {
+    if (e) {return next(e)}
+
+    if (r === '0x0000000000000000000000000000000000000000') {
+      return next(new Error('Cannot find a controller for the user account'))
+    }
+
+    var controllerAddr = r
+    console.log('Controller: ' + controllerAddr)
+
+    let controller = Controller.at(controllerAddr)
+
+    historyMap.get(email, (e, r) => {
+      if (e) {return next(e)}
+
+      let historyContract = History.at(r)
+
+      historyContract.getLength((e, r) => {
+        if (r <= 0) {
+          return next(new Error('No history'))
+        }
+        console.log('Number of histories: ' + r)
+
+        let numHistory = r
+        let numDone = 0
+        var retArray = []
+        for (let i = 0; i < numHistory; i++) {
+          historyContract.get(i, (e, r) => {
+            console.log('IPFS hash ' + i + ' got: ' + r)
+            let ipfsHash = r
+            di.get(ipfsHash, (e, r) => {
+              if (e) {return next(e)}
+
+              console.log('IPFS Data: ' + r)
+              let obj = JSON.parse(r)
+              retArray.push(obj)
+              numDone++
+
+              if (numDone == numHistory) {
+                console.log('Returing histories: ' + retArray)
+                return next(null, retArray)
+              }
+            })
+          })
+        }
       })
     })
   })
@@ -364,5 +722,9 @@ module.exports = {
   init,
   setupAccount,
   updateProfile,
-  showProfile
+  showProfile,
+  approveDoctor,
+  searchByEmail,
+  addHistory,
+  getHistories
 }
