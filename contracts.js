@@ -22,6 +22,8 @@ var Controller
 var ProxyContract
 var History
 
+var jsonConfigPath = '../dolphin/src/contracts.json'
+
 function init(next) {
   console.log('Init called')
   web3 = new Web3(new Web3.providers.HttpProvider("http://localhost:8545"))
@@ -43,30 +45,43 @@ function init(next) {
     })
   })
 
+
   deploy('CtrMap', [], null, (e, r) => {
     if (e) {return next(e)}
     var CtrMap = web3.eth.contract(r.abi)
     ctrMap = CtrMap.at(r.address)
+
+    fs.writeFileSync(jsonConfigPath, '{\n')
+    fs.appendFileSync(jsonConfigPath, '"CtrMap"' + ':' + '"' + r.address + '",\n')
 
     deploy('HistoryMap', [], null, (e, r) => {
       if (e) {return next(e)}
       var HistoryMap = web3.eth.contract(r.abi)
       historyMap = HistoryMap.at(r.address)
 
+      fs.appendFileSync(jsonConfigPath, '"HistoryMap"' + ':' + '"' + r.address + '",\n')
+
       deploy('Profiles', [], null, (e, r) => {
         if (e) {return next(e)}
         var Profiles = web3.eth.contract(r.abi)
         profiles = Profiles.at(r.address)
+
+        fs.appendFileSync(jsonConfigPath, '"Profiles"' + ':' + '"' + r.address + '",\n')
 
         deploy('Doctors', [], null, (e, r) => {
           if (e) {return next(e)}
           var Doctors = web3.eth.contract(r.abi)
           doctors = Doctors.at(r.address)
 
+          fs.appendFileSync(jsonConfigPath, '"Doctors"' + ':' + '"' + r.address + '",\n')
+
           deploy('MediBlocToken', [1000000000, 'MediBloc Token', 4, 'MED'], null, (e, r) => {
             if (e) {return next(e)}
             var MediBlocToken = web3.eth.contract(r.abi)
             mediBlocToken = MediBlocToken.at(r.address)
+
+            fs.appendFileSync(jsonConfigPath, '"MediBlocToken"' + ':' + '"' + r.address + '"\n')
+            fs.appendFileSync(jsonConfigPath, '}')
           })
         })
       })
@@ -75,7 +90,7 @@ function init(next) {
 
   compile('Controller', 'Proxy', (e, r) => {
     Controller = web3.eth.contract(r.abi)
-  }, 'Proxy')
+  })
 
   compile('Proxy', null, (e, r) => {
     ProxyContract = web3.eth.contract(r.abi)
@@ -210,6 +225,7 @@ function setupAccount(email, next) {
                     } else {
                       console.log('****** Sent initial MED to the new user account: ' + proxy.address)
                     }
+                    mediTokenTransfered.stopWatching()
                   })
 
                   controller.getUser((e, r) => {
@@ -479,6 +495,7 @@ function approveDoctor(email, account, inst, role, next) {
           } else {
             console.log('********** [Doctors] Approve result: ' + r)
           }
+          event.stopWatching()
 
           doctors.isQualified(proxy, (e, r) => {
             if (e) {return next(e)}
