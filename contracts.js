@@ -3,6 +3,7 @@ const fs = require('fs')
 const solc = require('solc')
 const ethl = require('eth-lightwallet')
 const etx = require('ethereumjs-tx')
+const http = require('http')
 const Keystore = ethl.keystore
 const tu = ethl.txutils
 const sg = ethl.signing
@@ -52,35 +53,35 @@ function init(next) {
     ctrMap = CtrMap.at(r.address)
 
     fs.writeFileSync(jsonConfigPath, '{\n')
-    fs.appendFileSync(jsonConfigPath, '"CtrMap"' + ':' + '"' + r.address + '",\n')
+    fs.appendFileSync(jsonConfigPath, '"ctrMap"' + ':' + '"' + r.address + '",\n')
 
     deploy('HistoryMap', [], null, (e, r) => {
       if (e) {return next(e)}
       var HistoryMap = web3.eth.contract(r.abi)
       historyMap = HistoryMap.at(r.address)
 
-      fs.appendFileSync(jsonConfigPath, '"HistoryMap"' + ':' + '"' + r.address + '",\n')
+      fs.appendFileSync(jsonConfigPath, '"historyMap"' + ':' + '"' + r.address + '",\n')
 
       deploy('Profiles', [], null, (e, r) => {
         if (e) {return next(e)}
         var Profiles = web3.eth.contract(r.abi)
         profiles = Profiles.at(r.address)
 
-        fs.appendFileSync(jsonConfigPath, '"Profiles"' + ':' + '"' + r.address + '",\n')
+        fs.appendFileSync(jsonConfigPath, '"profiles"' + ':' + '"' + r.address + '",\n')
 
         deploy('Doctors', [], null, (e, r) => {
           if (e) {return next(e)}
           var Doctors = web3.eth.contract(r.abi)
           doctors = Doctors.at(r.address)
 
-          fs.appendFileSync(jsonConfigPath, '"Doctors"' + ':' + '"' + r.address + '",\n')
+          fs.appendFileSync(jsonConfigPath, '"doctors"' + ':' + '"' + r.address + '",\n')
 
           deploy('MediBlocToken', [1000000000, 'MediBloc Token', 4, 'MED'], null, (e, r) => {
             if (e) {return next(e)}
             var MediBlocToken = web3.eth.contract(r.abi)
             mediBlocToken = MediBlocToken.at(r.address)
 
-            fs.appendFileSync(jsonConfigPath, '"MediBlocToken"' + ':' + '"' + r.address + '"\n')
+            fs.appendFileSync(jsonConfigPath, '"mediBlocToken"' + ':' + '"' + r.address + '"\n')
             fs.appendFileSync(jsonConfigPath, '}')
           })
         })
@@ -665,6 +666,48 @@ function addHistory(patient, author, content, next) {
                 console.log('********** [Proxy] Fowarding result: ' + r)
               }
               forwarded.stopWatching()
+
+              historyContract.getLength((e, r) => {
+                for (let i = r - 1; i >= 0; i--) {
+                  if (ipfsHash === historyContract.get(i)) {
+                    let options = {
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                      },
+                      method: 'POST',
+                      host: 'localhost',
+                      port: 3333,
+                      path: '/histories',
+                    }
+
+                    let req = http.request(options, (res) => {
+                      var output = ''
+                      res.setEncoding('utf8')
+
+                      res.on('data', (chunk) => {
+                          output += chunk
+                      })
+
+                      res.on('end', () => {
+                          console.log(output)
+                      })
+                    })
+
+                    req.on('error', (e) => {
+                      console.log(e)
+                    })
+
+                    req.write(JSON.stringify(Object.assign(content,
+                      {index: i, patient: patient.account, date: Date.parse(Date())})))
+
+                    req.end()
+
+                    break
+                  }
+                }
+              })
+
               return next(null, ret)
             })
 
