@@ -1,6 +1,14 @@
 var express = require('express')
 var path = require('path')
 var bodyParser = require('body-parser')
+
+var mongoose = require('mongoose')
+require('./models/Users')
+require('./models/Histories')
+require('./models/HistoryUploadRequests')
+
+mongoose.connect('mongodb://localhost/cameleon')
+
 var ct = require('./contracts')
 
 ct.init((e, r) => {

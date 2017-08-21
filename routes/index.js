@@ -2,6 +2,7 @@ var express = require('express')
 var router = express.Router()
 var Web3 = require('web3')
 var ct = require('../contracts')
+var hi = require('../histories')
 
 router.get('/', function(req, res, next) {
   return res.json({health: 'ok'})
@@ -83,15 +84,26 @@ router.post('/history', function(req, res, next) {
 
 router.post('/histories', function(req, res, next) {
   ct.getHistories(req.body.email, req.body.account, req.body.priKey, (e, r) => {
-      if (e) {
-        console.log(e)
-        return next(e)
-      }
+    if (e) {
+      console.log(e)
+      return next(e)
+    }
 
-      console.log('History returning: ' + r)
+    console.log('History returning: ' + r)
 
-      return res.json(r)
-    })
+    return res.json(r)
+  })
+})
+
+router.post('/request_history_upload', function(req, res, next) {
+  hi.requestUpload(req.body.content, req.body.owner, req.body.author, (e, r) => {
+    if (e) {
+      console.log(e)
+      return next(e)
+    }
+
+    return res.json(r)
+  })
 })
 
 module.exports = router

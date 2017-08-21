@@ -4,10 +4,12 @@ const solc = require('solc')
 const ethl = require('eth-lightwallet')
 const etx = require('ethereumjs-tx')
 const http = require('http')
+const crypto = require('crypto')
 const Keystore = ethl.keystore
 const tu = ethl.txutils
 const sg = ethl.signing
 const di = require('./data-interface')
+const hi = require('./histories')
 
 var ks
 var dkey
@@ -210,7 +212,8 @@ function setupAccount(email, next) {
             var history = History.at(r.address)
             console.log('History: ' + history.address)
 
-            historyMap.update.sendTransaction(email, history.address, {from: web3.eth.coinbase}, (e, r) => {
+            historyMap.update.sendTransaction(email, history.address, {from: web3.eth.coinbase},
+              (e, r) => {
 
               mediBlocToken.transfer.sendTransaction(proxy.address, 10,
                 {from: web3.eth.coinbase}, (e, r) => {
@@ -236,7 +239,9 @@ function setupAccount(email, next) {
 
                   let gasEstimate = web3.toWei(0.2, 'ether')
 
-                  let controllerInitializeData = controller.initialize.getData(recovery.address, proxy.address)
+                  let controllerInitializeData = controller.initialize.getData(
+                    recovery.address,
+                    proxy.address)
                   let priKey = ks.exportPrivateKey(account.substring(2), dkey)
                   let keyBuffer = new Buffer(priKey, 'hex')
 
@@ -572,11 +577,32 @@ function searchByEmail(email, next) {
   })
 }
 
+function encryptObject(obj, key) {
+  console.log('Plain text\'s type: ' + typeof obj)
+
+  let cipher = crypto.createCipher('aes256', new Buffer(key, 'hex'), null)
+  let encrypted = cipher.update(JSON.stringify(obj), 'utf8', 'hex')
+  encrypted += cipher.final('hex')
+
+  console.log('Object encrypted: ' + encrypted)
+  return encrypted
+}
+
+function decryptObject(encHex, key) {
+  let decipher = crypto.createDecipher('aes256', new Buffer(key, 'hex'), null)
+  let decrypted = decipher.update(encHex, 'hex', 'utf8')
+  decrypted += decipher.final('utf8')
+
+  return JSON.parse(decrypted)
+}
+
 function addHistory(patient, author, content, next) {
+  let key = crypto.randomBytes(16)
+  let encryptedContent = encryptObject(content, key)
   web3.personal.unlockAccount(web3.eth.coinbase, "")
 
   let fileName = 'mbh_' + patient.email + '_' + Date.now() + '.json'
-  di.upload(content, fileName, (e, r) => {
+  di.upload(encryptedContent, fileName, (e, r) => {
     if (e) {
       console.log('Error occurred during IPFS upload!! : ' + e)
       return next(e)
@@ -605,7 +631,8 @@ function addHistory(patient, author, content, next) {
 
         let historyUpdateData = historyContract.update.getData(ipfsHash)
 
-        let controllerForwardData = controller.forward.getData(historyContract.address, 0x00, historyUpdateData)
+        let controllerForwardData = controller.forward.getData(historyContract.address,
+          0x00, historyUpdateData)
         let keyBuffer = new Buffer(author.priKey, 'hex')
 
         let rawTx = {
@@ -703,6 +730,11 @@ function addHistory(patient, author, content, next) {
 
                     req.end()
 
+                    hi.saveHistoryKey(patient.account, i, key, (e, r) => {
+                      if (e) {console.log(e)}
+                      console.log(r)
+                    })
+
                     break
                   }
                 }
@@ -728,7 +760,7 @@ function addHistory(patient, author, content, next) {
 }
 
 function getHistories(email, account, priKey, next) {
-  ctrMap.get(email, {from: web3.eth.coinbase}, (e, r) => {
+  ctrMap.get(email, (e, r) => {
     if (e) {return next(e)}
 
     if (r === '0x0000000000000000000000000000000000000000') {
@@ -745,34 +777,225 @@ function getHistories(email, account, priKey, next) {
 
       let historyContract = History.at(r)
 
-      historyContract.getLength((e, r) => {
-        if (r <= 0) {
-          return next(new Error('No history'))
+      historyContract.get((e, r) => {
+        if (!r) {
+          return next(null, [])
         }
-        console.log('Number of histories: ' + r)
 
-        let numHistory = r
-        let numDone = 0
-        var retArray = []
-        for (let i = 0; i < numHistory; i++) {
-          historyContract.get(i, (e, r) => {
-            console.log('IPFS hash ' + i + ' got: ' + r)
-            let ipfsHash = r
-            di.get(ipfsHash, (e, r) => {
-              if (e) {return next(e)}
+        let historiesHash = r
+        di.get(historiesHash, (e, r) => {
+          console.log('IPFS Error: ' + e)
+          let histories = []
+          if (r) {
+            histories = JSON.parse(r)
+          }
 
-              console.log('IPFS Data: ' + r)
-              let obj = JSON.parse(r)
-              retArray.push(obj)
-              numDone++
+          var retArray = []
 
-              if (numDone == numHistory) {
-                console.log('Returing histories: ' + retArray)
+          for (i = 0; i < histories.length; i++) {
+            di.get(histories[i], (e, r) => {
+              retArray.push(decryptObject(r, priKey))
+
+              if (retArray.length === histories.length) {
                 return next(null, retArray)
               }
             })
-          })
+          }
+        })
+      })
+    })
+  })
+}
+
+function uploadHistory(id, email, account, priKey, next) {
+  hi.getUploadRequest(id, (e, r) => {
+    if (e) {
+      return next(e)
+    }
+
+    let content = {
+      author: r.author,
+      disease: r.disease,
+      prescription: r.prescription,
+      description: r.description,
+      date: r.date
+    }
+    let encryptedContent = encryptObject(content, priKey)
+    web3.personal.unlockAccount(web3.eth.coinbase, "")
+
+    let fileName = 'mbh_' + email + '_' + Date.now() + '.json'
+    di.upload(encryptedContent, fileName, (e, r) => {
+      if (e) {
+        console.log('Error occurred during IPFS upload!! : ' + e)
+        return next(e)
+      }
+
+      console.log(r)
+      var ipfsHash = r
+      console.log('IPFS Hash got: ' + ipfsHash)
+
+      ctrMap.get(email, (e, r) => {
+        if (e) {return next(e)}
+
+        if (r === '0x0000000000000000000000000000000000000000') {
+          return next(new Error('Cannot find a controller for the user account'))
         }
+
+        let controller = Controller.at(r)
+
+        historyMap.get(email, (e, r) => {
+          if (e) {return next(e)}
+
+          let historyContract = History.at(r)
+
+          let originalHash = historyContract.get((e, r) => {
+            if (e) {
+              console.log('Error getting history hash: ' + e)
+              return next(e)
+            }
+
+            let histories = []
+
+            di.get(originalHash, (e, r) => {
+              if (!!r) {
+                histories = JSON.parse(r)
+              }
+
+              let historyIndex = histories.push(ipfsHash) - 1
+
+              di.upload(histories, email + '_histories.json', (e, r) => {
+                if (e) {
+                  console.log('Error occrred while uploading histories to IPFS: ' + e)
+                  return next(e)
+                }
+
+                let historiesHash = r
+
+                let historyUpdateData = historyContract.update.getData(historiesHash)
+
+                let controllerForwardData = controller.forward.getData(historyContract.address,
+                  0x00, historyUpdateData)
+                let keyBuffer = new Buffer(priKey, 'hex')
+
+                let rawTx = {
+                  data: controllerForwardData,
+                  nonce: web3.toHex(web3.eth.getTransactionCount(account)),
+                  to: controllerAddr.toString(),
+                  from: account,
+                  gasPrice: web3.toHex(web3.eth.gasPrice),
+                  gasLimit: '0x47E7C4',
+                  value: '0x00'
+                }
+
+                var tx = new etx(rawTx)
+                tx.sign(keyBuffer)
+
+                var serializedTx = tx.serialize()
+                var stx = '0x' + serializedTx.toString('hex')
+
+                console.log('Signed tx: ' + stx)
+                console.log('Type of stx: ' + typeof stx)
+
+                var gasEstimate = web3.toWei(0.2, 'ether')
+
+                web3.eth.sendTransaction({
+                  from: web3.eth.coinbase,
+                  to: account,
+                  value: gasEstimate
+                }, (e, r) => {
+                  if (e) {
+                    console.log('Error while transfering gas fee to user: ' + e)
+                    return next(e)
+                  }
+
+                  if (e) {
+                    console.log('Error while transfering gas fee to controller: ' + e)
+                    return next(e)
+                  }
+
+                  let controllerForwarded = controller.Forwarded({data: historyUpdateData})
+                  controllerForwarded.watch((e, r) => {
+                    if (e) {
+                      console.log('********** [Controller] <<<Error>>> occurred in forwarding: ' + e)
+                      controllerForwarded.stopWatching()
+                      return next(e)
+                    } else {
+                      console.log('********** [Controller] Fowarding result: ' + r)
+                    }
+                    controllerForwarded.stopWatching()
+                  })
+
+                  var ret = {}
+                  controller.getProxy((e, r) => {
+                    let proxy = ProxyContract.at(r)
+                    let forwarded = proxy.Forwarded({data: historyUpdateData})
+                    forwarded.watch((e, r) => {
+                      if (e) {
+                        console.log('********** [Proxy] <<<Error>>> occurred in forwarding: ' + e)
+                        forwarded.stopWatching()
+                        return next(e)
+                      } else {
+                        console.log('********** [Proxy] Fowarding result: ' + r)
+                      }
+                      forwarded.stopWatching()
+
+                      let options = {
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'Accept': 'application/json',
+                        },
+                        method: 'POST',
+                        host: 'localhost',
+                        port: 3333,
+                        path: '/histories',
+                      }
+
+                      let req = http.request(options, (res) => {
+                        var output = ''
+                        res.setEncoding('utf8')
+
+                        res.on('data', (chunk) => {
+                            output += chunk
+                        })
+
+                        res.on('end', () => {
+                            console.log(output)
+                        })
+                      })
+
+                      req.on('error', (e) => {
+                        console.log(e)
+                      })
+
+                      req.write(JSON.stringify(Object.assign(content,
+                        {index: historyIndex, owner: proxy.address})))
+
+                      req.end()
+
+                      removeUploadRequest(id, (e, r) => {
+                        if (e) {
+                          console.log(e)
+                        }
+                      })
+
+                      return next(null, ret)
+                    })
+
+                    web3.eth.sendRawTransaction(stx, (e, r) => {
+                      if (e) {
+                        console.log('Error while processing update transaction: ' + e)
+                        return next(e)
+                      }
+                      console.log('Transaction Hash: ', r)
+
+                      ret.tx = r
+                    })
+                  })
+                })
+              })
+            })
+          })
+        })
       })
     })
   })
@@ -786,5 +1009,6 @@ module.exports = {
   approveDoctor,
   searchByEmail,
   addHistory,
-  getHistories
+  getHistories,
+  uploadHistory
 }
